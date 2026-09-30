@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разбор результата</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Разбор результата</h1>
+    <p class="sub">Страница для преподавателя: ответы целиком, включая письменную часть.</p>
+  </header>
+  <main id="stage"><p class="empty">Загружаю…</p></main>
+</div>
+
+<script>
+const id = location.pathname.split("/").pop();
+
+(async () => {
+  const res = await fetch("/api/result/" + id);
+  const stage = document.getElementById("stage");
+  if (!res.ok) { stage.innerHTML = '<p class="empty">Результата ещё нет.</p>'; return; }
+
+  const { name, avatar, result: r, questions } = await res.json();
+  const byId = Object.fromEntries(questions.map(q => [q.id, q]));
+  const secNames = { hoeren: "Hören", lesen: "Lesen", grammatik: "Grammatik & Wortschatz" };
+
+  const head = document.createElement("section");
+  head.className = "card";
+  head.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px">
+      <img class="avatar lg" src="/static/cats/${avatar}" alt="">
+      <div><b style="font-size:20px"></b>
+      <div class="sub">Уровень <b>${r.level}</b> · ${r.correct} из ${r.total} верно</div></div>
+    </div>`;
+  head.querySelector("b").textContent = name;
+  stage.innerHTML = "";
+  stage.appendChild(head);
+
+  // разбор по уровням
+  const lv = document.createElement("section");
+  lv.className = "card";
+  lv.innerHTML = "<h2>По уровням</h2><div class='scores'>" +
+    Object.entries(r.per_level).map(([k, v]) =>
+      `<div><b>${v.correct}/${v.total}</b><small>${k}</small></div>`).join("") + "</div>";
+  stage.appendChild(lv);
+
+  // закрытые вопросы
+  const det = document.createElement("section");
+  det.className = "card";
+  det.innerHTML = "<h2>Ответы</h2>";
+  let cur = null;
+  r.details.forEach(d => {
+    const q = byId[d.id];
+    if (d.section !== cur) {
+      cur = d.section;
+      const h = document.createElement("p");
+      h.style.cssText = "font-weight:700;margin:18px 0 6px";
+      h.textContent = secNames[cur] || cur;
+      det.appendChild(h);
+    }
+    const row = document.createElement("div");
+    row.style.cssText = "padding:10px 0;border-bottom:1px solid var(--border)";
+    const given = d.given === null || d.given === undefined ? "— нет ответа" : q.options[d.given];
+    row.innerHTML = `
+      <div style="font-size:14px;color:var(--muted)">${d.level}</div>
+      <div style="font-weight:600;margin:2px 0 4px"></div>
+      <div class="${d.correct ? "ok" : "bad"}">${d.correct ? "✓" : "✗"} <span></span></div>
+      ${d.correct ? "" : '<div class="sub" style="font-size:14px">верно: <span></span></div>'}`;
+    row.children[1].textContent = q.prompt;
+    row.querySelector("." + (d.correct ? "ok" : "bad") + " span").textContent = given;
+    if (!d.correct) row.lastElementChild.querySelector("span").textContent = q.options[d.expected];
+    det.appendChild(row);
+  });
+  stage.appendChild(det);
+
+  // письменная часть
+  const wr = document.createElement("section");
+  wr.className = "card";
+  wr.innerHTML = "<h2>Schreiben — проверяется вручную</h2>";
+  Object.entries(r.written).forEach(([qid, txt]) => {
+    const q = byId[qid];
+    const p = document.createElement("p");
+    p.style.cssText = "font-weight:600;margin:16px 0 4px";
+    p.textContent = q.prompt;
+    const box = document.createElement("div");
+    box.className = "written";
+    box.textContent = txt && txt.trim() ? txt : "— пусто —";
+    wr.appendChild(p); wr.appendChild(box);
+  });
+  stage.appendChild(wr);
+})();
+</script>
+</body>
+</html>

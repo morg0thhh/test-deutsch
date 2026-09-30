@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Einstufungstest — Aufgaben</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="progress" id="progress" hidden>
+    <div class="meta">
+      <span id="section-name"></span>
+      <span id="counter"></span>
+    </div>
+    <div class="track"><i id="track" style="width:0%"></i></div>
+    <div class="dots" id="dots"></div>
+  </div>
+
+  <main id="stage"></main>
+
+</div>
+
+<script>
+const LS = "deutschtest_profile";
+const $ = s => document.querySelector(s);
+
+let cfg = null, qs = [], cats = [], sections = {};
+let answers = {}, step = 0, me = null;
+
+function loadProfile() {
+  try { return JSON.parse(localStorage.getItem(LS)); } catch { return null; }
+}
+
+async function boot() {
+  me = loadProfile();
+  if (!me) { location.href = "/"; return; }
+
+  cfg = await (await fetch("/api/config")).json();
+  qs = cfg.questions;
+  cats = cfg.cats;
+  cfg.sections.forEach(s => sections[s.id] = s);
+
+  if (me.finished && me.result) { showResult(me.result); return; }
+
+  const saved = sessionStorage.getItem("answers_" + me.id);
+  if (saved) { try { answers = JSON.parse(saved); } catch {} }
+  step = Math.min(Number(sessionStorage.getItem("step_" + me.id) || 0), qs.length - 1);
+
+  $("#progress").hidden = false;
+  render();
+}
+
+/* котик для вопроса — стабильно один и тот же при возврате назад */
+const catFor = i => cats[i % cats.length];
+
+function save() {
+  sessionStorage.setItem("answers_" + me.id, JSON.stringify(answers));
+  sessionStorage.setItem("step_" + me.id, String(step));
+  fetch("/api/progress", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: me.id, token: me.token, step,
+      section: qs[Math.min(step, qs.length - 1)].section, answers,
+    }),
+  }).catch(() => {});
+}
+
+function renderProgress() {
+  const q = qs[step], sec = sections[q.section];
+  $("#section-name").textContent = sec.icon + "  " + sec.title + " · " + sec.subtitle;
+  $("#counter").textContent = (step + 1) + " / " + qs.length;
+  $("#track").style.width = (100 * step / qs.length) + "%";
+
+  const dots = $("#dots");
+  dots.innerHTML = "";
+  qs.forEach((qq, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = i + 1;
+    b.title = sections[qq.section].title + " — Aufgabe " + (i + 1);
+    if (answers[qq.id] !== undefined && answers[qq.id] !== "") b.classList.add("answered");
+    if (i === step) b.classList.add("current");
+    b.onclick = () => { step = i; save(); render(); };
+    dots.appendChild(b);
+  });
+}
+
+function render() {
+  renderProgress();
+  const q = qs[step];
+  const stage = $("#stage");
+  stage.innerHTML = "";
+
+  const card = document.createElement("section");
+  card.className = "card";
+
+  // шапка вопроса с котиком
+  const head = document.createElement("div");
+  head.className = "qhead";
+  head.innerHTML = `<img class="avatar" src="/static/cats/${catFor(step)}" alt="">
+    <span class="tag">${sections[q.section].icon} ${sections[q.section].title} · Aufgabe ${step + 1}</span>`;
+  card.appendChild(head);
+
+  // видео для аудирования
+  if (q.video) {
+    const v = document.createElement("div");
+    v.className = "video";
+    const src = "https://www.youtube-nocookie.com/embed/" + q.video.id
+              + "?start=" + q.video.start + "&rel=0&modestbranding=1";
+    v.innerHTML = `
+      <div class="frame">
+        <iframe src="${src}" title="Hörverstehen" allow="accelerometer; encrypted-media; picture-in-picture"
+                allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+      <div class="cap">
+        <span>▶︎ ${q.video.hint} — ролик уже перемотан на нужный момент</span>
+        <a href="https://www.youtube.com/watch?v=${q.video.id}&t=${q.video.start}s"
+           target="_blank" rel="noopener">открыть на YouTube ↗</a>
+      </div>`;
+    card.appendChild(v);
+  }
+
+  // текст для чтения
+  if (q.text) {
+    const t = document.createElement("div");
+    t.className = "reading";
+    t.textContent = q.text;
+    card.appendChild(t);
+  }
+
+  const p = document.createElement("p");
+  p.className = "qtext";
+  p.textContent = q.prompt;
+  card.appendChild(p);
+
+  if (q.type === "choice") {
+    const box = document.createElement("div");
+    box.className = "opts";
+    q.options.forEach((opt, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(answers[q.id] === i));
+      b.innerHTML = `<span class="key">${"ABC"[i] || i + 1}</span><span></span>`;
+      b.lastElementChild.textContent = opt;
+      b.onclick = () => {
+        answers[q.id] = i;
+        [...box.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
+        save();
+        // ответила — едем дальше, но с паузой, чтобы был виден выбор
+        setTimeout(() => { if (step < qs.length - 1) { step++; render(); } else { renderProgress(); } }, 380);
+      };
+      box.appendChild(b);
+    });
+    card.appendChild(box);
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = answers[q.id] || "";
+    ta.placeholder = q.placeholder || "";
+    ta.oninput = () => { answers[q.id] = ta.value; };
+    ta.onblur = save;
+    card.appendChild(ta);
+  }
+
+  // навигация
+  const nav = document.createElement("div");
+  nav.className = "nav";
+  const back = document.createElement("button");
+  back.textContent = "← Назад";
+  back.disabled = step === 0;
+  back.onclick = () => { step--; save(); render(); };
+  nav.appendChild(back);
+
+  const last = step === qs.length - 1;
+  const fwd = document.createElement("button");
+  fwd.className = "primary";
+  fwd.textContent = last ? "Завершить тест" : "Дальше →";
+  fwd.onclick = () => {
+    if (last) finish();
+    else { step++; save(); render(); }
+  };
+  nav.appendChild(fwd);
+  card.appendChild(nav);
+
+  stage.appendChild(card);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function finish() {
+  const unanswered = qs.filter(q => q.type === "choice" && answers[q.id] === undefined);
+  if (unanswered.length) {
+    const first = qs.indexOf(unanswered[0]);
+    if (!confirm("Без ответа осталось вопросов: " + unanswered.length +
+                 ".\n\nОК — перейти к первому из них, Отмена — всё равно завершить.")) {
+      return submit();
+    }
+    step = first; save(); render(); return;
+  }
+  submit();
+}
+
+async function submit() {
+  const res = await fetch("/api/submit", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: me.id, token: me.token, answers }),
+  });
+  if (!res.ok) { alert("Не удалось отправить ответы"); return; }
+  const result = await res.json();
+  me.finished = true; me.level = result.level; me.result = result;
+  localStorage.setItem(LS, JSON.stringify(me));
+  sessionStorage.removeItem("answers_" + me.id);
+  sessionStorage.removeItem("step_" + me.id);
+  showResult(result);
+}
+
+function showResult(r) {
+  $("#progress").hidden = true;
+  const scale = ["A0", "A1", "A2", "B1", "B2"];
+  const stage = $("#stage");
+
+  const secNames = { hoeren: "Hören", lesen: "Lesen", grammatik: "Grammatik" };
+  const secBlocks = Object.entries(r.per_section).map(([k, v]) =>
+    `<div><b>${v.correct}/${v.total}</b><small>${secNames[k] || k}</small></div>`).join("");
+
+  stage.innerHTML = `
+    <section class="card result-level">
+      <h2 style="justify-self:center">Готово! 🎉</h2>
+      <div class="cat-scale">
+        ${scale.map((lv, i) => `
+          <div class="step ${i < r.cats ? "on" : ""}">
+            <img src="/static/cats/${cats[(i * 4) % cats.length]}" alt="">
+            <span>${lv}</span>
+          </div>`).join("")}
+      </div>
+      <div class="lvl">${r.level}</div>
+      <p style="margin:2px 0 0;font-weight:600">${r.level_title}</p>
+      <p class="sub" style="margin-top:8px">${r.level_comment}</p>
+      <div class="scores">
+        <div><b>${r.correct}/${r.total}</b><small>всего верно</small></div>
+        ${secBlocks}
+      </div>
+      <p class="sub" style="margin-top:18px">
+        Письменную часть проверит преподаватель — она не оценивается автоматически.
+      </p>
+      <div style="margin-top:18px"><a class="btn primary" href="/">На главную →</a></div>
+    </section>`;
+  window.scrollTo({ top: 0 });
+}
+
+boot();
+</script>
+</body>
+</html>

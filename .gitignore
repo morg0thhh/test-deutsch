@@ -1,0 +1,11 @@
+# база теста — не в репозиторий
+app/data/*.db
+app/data/*.db-journal
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store

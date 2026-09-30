@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Einstufungstest Deutsch</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Einstufungstest Deutsch 🐱</h1>
+    <p class="sub">Четыре части: Hören, Lesen, Grammatik &amp; Wortschatz, Schreiben. Примерно 25 минут.</p>
+  </header>
+
+  <!-- Профиль -->
+  <section class="card" id="profile-card">
+    <h2>Твой профиль</h2>
+    <p class="sub" style="margin-bottom:16px">Выбери имя и котоаву — они будут висеть в рейтинге.</p>
+
+    <div id="profile-new">
+      <label for="name" style="display:block;font-weight:600;margin-bottom:6px">Как тебя зовут</label>
+      <input type="text" id="name" maxlength="40" placeholder="Например: Аня" autocomplete="nickname">
+
+      <p style="font-weight:600;margin:18px 0 8px">Выбери котоаву</p>
+      <div class="cat-picker" id="cat-picker"></div>
+
+      <div style="margin-top:20px">
+        <button class="primary" id="start" disabled>Начать тест</button>
+      </div>
+    </div>
+
+    <div id="profile-existing" hidden>
+      <div style="display:flex;align-items:center;gap:16px">
+        <img class="avatar lg" id="me-avatar" alt="">
+        <div style="flex:1">
+          <b id="me-name" style="font-size:19px"></b>
+          <div class="sub" id="me-status"></div>
+        </div>
+      </div>
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="primary" id="continue">Продолжить</button>
+        <button id="reset">Начать заново</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Рейтинг -->
+  <section class="card">
+    <h2>Рейтинг: кто на каком этапе</h2>
+    <ul class="board" id="board"></ul>
+    <p class="empty" id="board-empty">Пока никто не начинал. Будь первой 🐾</p>
+  </section>
+
+</div>
+
+<script>
+const LS = "deutschtest_profile";
+let cats = [], picked = null, questionCount = 0;
+
+const $ = s => document.querySelector(s);
+const profile = () => { try { return JSON.parse(localStorage.getItem(LS)); } catch { return null; } };
+
+async function boot() {
+  const cfg = await (await fetch("/api/config")).json();
+  cats = cfg.cats;
+  questionCount = cfg.questions.length;
+  renderPicker();
+  renderMe();
+  loadBoard();
+  setInterval(loadBoard, 8000);
+}
+
+function renderPicker() {
+  const box = $("#cat-picker");
+  box.innerHTML = "";
+  cats.forEach(f => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-pressed", "false");
+    b.setAttribute("aria-label", "Котоава " + f);
+    b.innerHTML = `<img src="/static/cats/${f}" alt="">`;
+    b.onclick = () => {
+      picked = f;
+      [...box.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
+      checkReady();
+    };
+    box.appendChild(b);
+  });
+}
+
+function checkReady() {
+  $("#start").disabled = !(picked && $("#name").value.trim());
+}
+document.addEventListener("input", e => { if (e.target.id === "name") checkReady(); });
+
+function renderMe() {
+  const p = profile();
+  if (!p) return;
+  $("#profile-new").hidden = true;
+  $("#profile-existing").hidden = false;
+  $("#me-avatar").src = "/static/cats/" + p.avatar;
+  $("#me-name").textContent = p.name;
+  $("#me-status").textContent = p.finished
+    ? "Тест пройден — уровень " + p.level
+    : "Тест начат, можно продолжить с того же места";
+  $("#continue").textContent = p.finished ? "Посмотреть результат" : "Продолжить";
+}
+
+$("#start").onclick = async () => {
+  $("#start").disabled = true;
+  const res = await fetch("/api/profile", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: $("#name").value.trim(), avatar: picked }),
+  });
+  if (!res.ok) { $("#start").disabled = false; alert("Не получилось создать профиль"); return; }
+  localStorage.setItem(LS, JSON.stringify(await res.json()));
+  location.href = "/test";
+};
+
+$("#continue").onclick = () => { location.href = "/test"; };
+$("#reset").onclick = () => {
+  localStorage.removeItem(LS);
+  picked = null;
+  $("#profile-existing").hidden = true;
+  $("#profile-new").hidden = false;
+  renderPicker();
+  checkReady();
+};
+
+async function loadBoard() {
+  let list;
+  try { list = await (await fetch("/api/players")).json(); } catch { return; }
+  const ul = $("#board");
+  $("#board-empty").hidden = list.length > 0;
+  ul.innerHTML = "";
+  list.forEach((p, i) => {
+    const li = document.createElement("li");
+    const stage = p.finished
+      ? "Готово — " + p.score + "/" + p.total + " правильных"
+      : (p.step ? "Вопрос " + (p.step + 1) + " из " + questionCount : "Только начала");
+    li.innerHTML = `
+      <span class="rank">${i + 1}</span>
+      <img class="avatar" src="/static/cats/${p.avatar}" alt="">
+      <span class="who">
+        <b></b>
+        <small></small>
+        <span class="bar"><i style="width:${p.finished ? 100 : p.progress}%"></i></span>
+      </span>
+      <span class="badge ${p.finished ? "done" : ""}">${p.finished ? p.level : p.progress + "%"}</span>`;
+    li.querySelector("b").textContent = p.name;       // без innerHTML — имя вводит пользователь
+    li.querySelector("small").textContent = stage;
+    ul.appendChild(li);
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+services:
+  deutschtest:
+    build: .
+    container_name: deutschtest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app/data:/srv/data
+    restart: unless-stopped

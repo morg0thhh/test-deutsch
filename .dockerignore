@@ -1,0 +1,6 @@
+/app/data
+/cats
+/research
+/rating
+**/__pycache__
+**/.DS_Store
